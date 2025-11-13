@@ -27,7 +27,8 @@ const employees = [
   { id: "NTS-004", name: "Vaishnavi GHODVINDE", shift: "9:00 AM - 6:00 PM" },
   { id: "NTS-005", name: "RUSHIKESH ANDHALE,", shift: "9:00 AM - 6:00 PM" },
   { id: "NTS-006", name: "Upasana Patil", shift: "9:00 AM - 6:00 PM" },
-  { id: "NTS-007", name: "Chotelal Singh", shift: "9:00 AM - 6:00 PM" },
+  { id: "NTS-007", name: "Prajakta Dhande", shift: "9:00 AM - 6:00 PM" },
+  { id: "NTS-008", name: "Chotelal Singh", shift: "9:00 AM - 6:00 PM" },
 
 ];
 
@@ -61,6 +62,7 @@ export default function App() {
   const [logs, setLogs] = useState(() =>
     JSON.parse(localStorage.getItem("attendanceLogs") || "[]")
   );
+const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
 
   // --- Save attendance actions ---
   const saveLog = (action, details = "") => {
@@ -141,84 +143,54 @@ export default function App() {
 
   // ✅ Export Excel with two tabs (Attendance + Leave)
   const downloadExcel = () => {
-    if (!logs.length && !leaves.length) {
-      alert("No records to export.");
-      return;
-    }
+  const pass = prompt("Enter Admin Password:");
 
-    // ---- Attendance tab ----
-    const workHours =
-      shiftStartTime && shiftEndTime
-        ? ((shiftEndTime - shiftStartTime) / 3600000).toFixed(2)
-        : "9.00";
+  if (pass !== ADMIN_PASSWORD) {
+    alert("❌ Incorrect password. Access denied.");
+    return;
+  }
 
-    const getBreakTotal = (type) =>
-      logs
-        .filter(
-          (l) =>
-            l.action === "BREAK_END" &&
-            l.details?.toLowerCase().includes(type.toLowerCase())
-        )
-        .reduce((t, l) => {
-          const match = l.details.match(/(\d+)/);
-          return t + (match ? parseInt(match[1]) : 0);
-        }, 0);
+  const allLogs = JSON.parse(localStorage.getItem("attendanceLogs") || "[]");
+  const allLeaves = JSON.parse(localStorage.getItem("leaves") || "[]");
 
-    const teaBreak = getBreakTotal("tea");
-    const lunchBreak = getBreakTotal("lunch");
-    const eveningBreak = getBreakTotal("evening");
-    const breather = getBreakTotal("breather");
-    const totalBreak = teaBreak + lunchBreak + eveningBreak + breather;
+  if (!allLogs.length && !allLeaves.length) {
+    alert("No data found to export.");
+    return;
+  }
 
-    const attendanceSheet = [
-      {
-        Date: new Date().toLocaleDateString("en-IN"),
-        "Employee ID": empId,
-        "Employee Name": empName,
-        "Shift (Default)": "9:00 AM - 6:00 PM",
-        "Shift Start": shiftStartTime
-          ? shiftStartTime.toLocaleTimeString("en-IN")
-          : "9:00 AM",
-        "Shift End": shiftEndTime
-          ? shiftEndTime.toLocaleTimeString("en-IN")
-          : "6:00 PM",
-        "Total Work (hrs)": workHours,
-        "Tea Break (min)": teaBreak,
-        "Lunch Break (min)": lunchBreak,
-        "Evening Break (min)": eveningBreak,
-        "Breather (min)": breather,
-        "Total Break (min)": totalBreak,
-        "Actions Logged": logs
-          .map((l) => `${l.action}${l.details ? ` (${l.details})` : ""}`)
-          .join(", "),
-      },
-    ];
+  // ---- Attendance Sheet (All employees consolidated) ----
+  const attendanceSheet = allLogs.map((l) => ({
+    Date: l.date,
+    Time: l.time,
+    "Employee ID": l.empId,
+    "Employee Name": l.empName,
+    Action: l.action,
+    Details: l.details || "",
+  }));
 
-    // ---- Leave tab ----
-    const leaveSheet =
-      leaves.length > 0
-        ? leaves.map((lv) => ({
-            "Employee ID": lv.empId,
-            "Employee Name": lv.empName,
-            "From Date": lv.from,
-            "To Date": lv.to,
-            "Reason": lv.reason,
-            "Applied On": lv.appliedOn,
-          }))
-        : [
-            {
-              Note: "No leave applications recorded.",
-            },
-          ];
+  // ---- Leaves Sheet (All employees) ----
+  const leaveSheet = allLeaves.length
+    ? allLeaves.map((lv) => ({
+        "Employee ID": lv.empId,
+        "Employee Name": lv.empName,
+        "From": lv.from,
+        "To": lv.to,
+        "Reason": lv.reason,
+        "Applied On": lv.appliedOn,
+      }))
+    : [{ Note: "No Leaves Recorded" }];
 
-    const wb = XLSX.utils.book_new();
-    const ws1 = XLSX.utils.json_to_sheet(attendanceSheet);
-    const ws2 = XLSX.utils.json_to_sheet(leaveSheet);
-    XLSX.utils.book_append_sheet(wb, ws1, "Attendance Report");
-    XLSX.utils.book_append_sheet(wb, ws2, "Leave Record");
+  const wb = XLSX.utils.book_new();
 
-    XLSX.writeFile(wb, `attendance_report_${empId}_${today}.xlsx`);
-  };
+  const ws1 = XLSX.utils.json_to_sheet(attendanceSheet);
+  const ws2 = XLSX.utils.json_to_sheet(leaveSheet);
+
+  XLSX.utils.book_append_sheet(wb, ws1, "All Attendance Logs");
+  XLSX.utils.book_append_sheet(wb, ws2, "All Leave Records");
+
+  XLSX.writeFile(wb, `NTS_Attendance_Report_All_${today}.xlsx`);
+};
+
 
   const downloadJSON = () => {
     const combined = { attendance: logs, leaves };
@@ -426,12 +398,7 @@ export default function App() {
           >
             <Download size={16} /> Download Excel
           </button>
-          <button
-            onClick={downloadJSON}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
-          >
-            <FileDown size={16} /> Download JSON
-          </button>
+          
         </div>
       </main>
 
