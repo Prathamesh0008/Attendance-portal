@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Coffee,
   Sandwich,
@@ -6,10 +6,8 @@ import {
   Wind,
   CalendarDays,
   Download,
-  FileDown,
   Clock,
   LogOut,
-  User,
   Play,
   StopCircle,
 } from "lucide-react";
@@ -18,6 +16,16 @@ import * as XLSX from "xlsx";
 import { isHoliday } from "./utils/indiaHolidays.js";
 import Modal from "./components/Modal.jsx";
 import TimerBar from "./components/TimerBar.jsx";
+
+// 🔥 Firestore imports
+import { db } from "./firebase";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+} from "firebase/firestore";
 
 // 🔹 Employee master list
 const employees = [
@@ -29,19 +37,17 @@ const employees = [
   { id: "NTS-006", name: "Upasana Patil", shift: "9:00 AM - 6:00 PM" },
   { id: "NTS-007", name: "Prajakta Dhande", shift: "9:00 AM - 6:00 PM" },
   { id: "NTS-008", name: "Chotelal Singh", shift: "9:00 AM - 6:00 PM" },
-
 ];
 
+// 🔐 Admin password for Excel download
+const ADMIN_PASSWORD = "Sky@2204";
+
+// 🔹 Firestore collection names
+const ATTENDANCE_COLLECTION = "attendanceLogs";
+const LEAVE_COLLECTION = "leaveRequests";
+
 export default function App() {
-  const {
-    // upsertEmployee,
-    dateKey,
-    clockIn,
-    clockOut,
-    addBreak,
-    // addBreatherOverrun,
-    requestLeave,
-  } = useAttendance();
+  const { dateKey, clockIn, clockOut, addBreak, requestLeave } = useAttendance();
 
   const today = dateKey();
   const [selectedDate, setSelectedDate] = useState(today);
@@ -56,80 +62,100 @@ export default function App() {
   const [leaveReason, setLeaveReason] = useState("");
   const [leaveFrom, setLeaveFrom] = useState(today);
   const [leaveTo, setLeaveTo] = useState(today);
-  const [leaves, setLeaves] = useState(() =>
-    JSON.parse(localStorage.getItem("leaves") || "[]")
-  );
-  const [logs, setLogs] = useState(() =>
-    JSON.parse(localStorage.getItem("attendanceLogs") || "[]")
-  );
-const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
 
-  // --- Save attendance actions ---
-  const saveLog = (action, details = "") => {
-    const newLog = {
-      date: new Date().toLocaleDateString("en-IN"),
-      time: new Date().toLocaleTimeString("en-IN"),
+  // 👇 current selected employee data (for shift window)
+  const currentEmployee = useMemo(
+    () => employees.find((e) => e.id === empId) || null,
+    [empId]
+  );
+
+  // --- Save attendance actions to Firestore ---
+  const saveLog = async (action, details = "") => {
+    if (!empId || !empName) return;
+
+    const now = new Date();
+
+    const payload = {
       empId,
       empName,
+      date: now.toLocaleDateString("en-IN"),
+      time: now.toLocaleTimeString("en-IN"),
       action,
       details,
+      createdAt: now.toISOString(), // for ordering
     };
-    const updated = [...logs, newLog];
-    setLogs(updated);
-    localStorage.setItem("attendanceLogs", JSON.stringify(updated));
+
+    try {
+      await addDoc(collection(db, ATTENDANCE_COLLECTION), payload);
+      console.log("✔ Attendance log saved to Firestore", payload);
+    } catch (err) {
+      console.error("Failed to save attendance:", err);
+      alert("⚠️ Could not sync attendance to server. Please check your internet.");
+    }
   };
 
-  // --- Save leaves ---
-  const saveLeave = (from, to, reason) => {
-    const newLeave = {
+  // --- Save leave to Firestore ---
+  const saveLeave = async (from, to, reason) => {
+    if (!empId || !empName)
+      return alert("Select employee before applying for leave.");
+
+    const now = new Date();
+
+    const payload = {
       empId,
       empName,
       from,
       to,
       reason,
-      appliedOn: new Date().toLocaleDateString("en-IN"),
+      appliedOn: now.toLocaleDateString("en-IN"),
+      createdAt: now.toISOString(),
     };
-    const updated = [...leaves, newLeave];
-    setLeaves(updated);
-    localStorage.setItem("leaves", JSON.stringify(updated));
+
+    try {
+      await addDoc(collection(db, LEAVE_COLLECTION), payload);
+      console.log("✔ Leave saved to Firestore", payload);
+    } catch (err) {
+      console.error("Failed to save leave:", err);
+      alert("⚠️ Could not sync leave to server. Please check your internet.");
+    }
   };
 
-  const startShift = () => {
+  const startShift = async () => {
     if (!empId || !empName) return alert("Select employee first.");
     setShiftStarted(true);
     const now = new Date();
     setShiftStartTime(now);
-    saveLog("SHIFT_START");
+    await saveLog("SHIFT_START");
   };
 
-  const endShift = () => {
+  const endShift = async () => {
     if (!shiftStarted) return;
     const now = new Date();
     setShiftEndTime(now);
     setShiftStarted(false);
-    saveLog("SHIFT_END");
+    await saveLog("SHIFT_END");
   };
 
-  const handleClockIn = () => {
+  const handleClockIn = async () => {
     if (!shiftStarted) return alert("Start your shift first!");
     clockIn(selectedDate, empId);
-    saveLog("CLOCK_IN");
+    await saveLog("CLOCK_IN");
   };
 
-  const handleClockOut = () => {
+  const handleClockOut = async () => {
     clockOut(selectedDate, empId);
-    saveLog("CLOCK_OUT");
+    await saveLog("CLOCK_OUT");
   };
 
-  const startBreak = (type, min) => {
+  const startBreak = async (type, min) => {
     if (!shiftStarted) return alert("Start shift before breaks!");
     if (activeBreak) return;
     const endTime = Date.now() + min * 60 * 1000;
     setActiveBreak({ type, endsAt: endTime, minutes: min });
-    saveLog("BREAK_START", type);
+    await saveLog("BREAK_START", type);
   };
 
-  const endBreak = () => {
+  const endBreak = async () => {
     if (!activeBreak) return;
     const elapsed = Math.ceil(
       (activeBreak.minutes * 60 * 1000 - (activeBreak.endsAt - Date.now())) /
@@ -137,76 +163,79 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
     );
     addBreak(selectedDate, empId, activeBreak.type, elapsed);
     setTotalBreakTime((p) => p + elapsed);
-    saveLog("BREAK_END", `${activeBreak.type} - ${elapsed}min`);
+    await saveLog("BREAK_END", `${activeBreak.type} - ${elapsed}min`);
     setActiveBreak(null);
   };
 
-  // ✅ Export Excel with two tabs (Attendance + Leave)
-  const downloadExcel = () => {
-  const pass = prompt("Enter Admin Password:");
+  // ✅ Export Excel: fetch ALL attendance + ALL leaves from Firestore
+  const downloadExcel = async () => {
+    const pass = prompt("Enter Admin Password:");
 
-  if (pass !== ADMIN_PASSWORD) {
-    alert("❌ Incorrect password. Access denied.");
-    return;
-  }
+    if (pass !== ADMIN_PASSWORD) {
+      alert("❌ Incorrect password. Access denied.");
+      return;
+    }
 
-  const allLogs = JSON.parse(localStorage.getItem("attendanceLogs") || "[]");
-  const allLeaves = JSON.parse(localStorage.getItem("leaves") || "[]");
+    try {
+      // Fetch all attendance logs
+      const attendanceRef = collection(db, ATTENDANCE_COLLECTION);
+      const attendanceQuery = query(attendanceRef, orderBy("createdAt", "asc"));
+      const attendanceSnap = await getDocs(attendanceQuery);
 
-  if (!allLogs.length && !allLeaves.length) {
-    alert("No data found to export.");
-    return;
-  }
+      const attendanceData = attendanceSnap.docs.map((doc) => doc.data());
 
-  // ---- Attendance Sheet (All employees consolidated) ----
-  const attendanceSheet = allLogs.map((l) => ({
-    Date: l.date,
-    Time: l.time,
-    "Employee ID": l.empId,
-    "Employee Name": l.empName,
-    Action: l.action,
-    Details: l.details || "",
-  }));
+      // Fetch all leave records
+      const leaveRef = collection(db, LEAVE_COLLECTION);
+      const leaveQuery = query(leaveRef, orderBy("createdAt", "asc"));
+      const leaveSnap = await getDocs(leaveQuery);
 
-  // ---- Leaves Sheet (All employees) ----
-  const leaveSheet = allLeaves.length
-    ? allLeaves.map((lv) => ({
-        "Employee ID": lv.empId,
-        "Employee Name": lv.empName,
-        "From": lv.from,
-        "To": lv.to,
-        "Reason": lv.reason,
-        "Applied On": lv.appliedOn,
-      }))
-    : [{ Note: "No Leaves Recorded" }];
+      const leaveData = leaveSnap.docs.map((doc) => doc.data());
 
-  const wb = XLSX.utils.book_new();
+      if (!attendanceData.length && !leaveData.length) {
+        alert("No data found in Firestore to export.");
+        return;
+      }
 
-  const ws1 = XLSX.utils.json_to_sheet(attendanceSheet);
-  const ws2 = XLSX.utils.json_to_sheet(leaveSheet);
+      const wb = XLSX.utils.book_new();
 
-  XLSX.utils.book_append_sheet(wb, ws1, "All Attendance Logs");
-  XLSX.utils.book_append_sheet(wb, ws2, "All Leave Records");
+      if (attendanceData.length) {
+        // Convert attendance JSON to worksheet
+        const attendanceSheetData = attendanceData.map((l) => ({
+          Date: l.date,
+          Time: l.time,
+          "Employee ID": l.empId,
+          "Employee Name": l.empName,
+          Action: l.action,
+          Details: l.details || "",
+        }));
+        const ws1 = XLSX.utils.json_to_sheet(attendanceSheetData);
+        XLSX.utils.book_append_sheet(wb, ws1, "Attendance Logs");
+      }
 
-  XLSX.writeFile(wb, `NTS_Attendance_Report_All_${today}.xlsx`);
-};
+      if (leaveData.length) {
+        const leaveSheetData = leaveData.map((lv) => ({
+          "Employee ID": lv.empId,
+          "Employee Name": lv.empName,
+          "From Date": lv.from,
+          "To Date": lv.to,
+          Reason: lv.reason,
+          "Applied On": lv.appliedOn,
+        }));
+        const ws2 = XLSX.utils.json_to_sheet(leaveSheetData);
+        XLSX.utils.book_append_sheet(wb, ws2, "Leave Records");
+      }
 
-
-  const downloadJSON = () => {
-    const combined = { attendance: logs, leaves };
-    const blob = new Blob([JSON.stringify(combined, null, 2)], {
-      type: "application/json",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `attendance_data_${empId}_${today}.json`;
-    link.click();
+      XLSX.writeFile(wb, `NTS_Attendance_Full_${today}.xlsx`);
+    } catch (err) {
+      console.error("Error while downloading Excel:", err);
+      alert("⚠️ Failed to fetch data from Firestore. Please try again.");
+    }
   };
 
-  const handleLeaveSubmit = () => {
-    saveLeave(leaveFrom, leaveTo, leaveReason);
+  const handleLeaveSubmit = async () => {
+    await saveLeave(leaveFrom, leaveTo, leaveReason);
     requestLeave(empId, leaveFrom, leaveTo, leaveReason);
-    saveLog("LEAVE_APPLIED", leaveReason);
+    await saveLog("LEAVE_APPLIED", leaveReason);
     setLeaveOpen(false);
     alert("✅ Leave submitted successfully");
   };
@@ -215,6 +244,7 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
     const d = new Date(selectedDate).getDay();
     return d === 0 || d === 6;
   }, [selectedDate]);
+
   const isDayOff = isWeekend || isHoliday(selectedDate);
 
   return (
@@ -246,7 +276,8 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
             <select
               value={empId}
               onChange={(e) => {
-                if (shiftStarted) return alert("Shift in progress. Cannot change employee.");
+                if (shiftStarted)
+                  return alert("Shift in progress. Cannot change employee.");
                 const id = e.target.value;
                 const emp = employees.find((x) => x.id === id);
                 setEmpId(id);
@@ -288,7 +319,9 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
           <div className="bg-white p-4 rounded-xl shadow-sm grid grid-cols-2 sm:grid-cols-4 text-center text-slate-700">
             <div>
               <p className="text-xs uppercase text-slate-400">Shift Window</p>
-              <p className="font-semibold">9:00 AM – 6:00 PM</p>
+              <p className="font-semibold">
+                {currentEmployee?.shift || "9:00 AM – 6:00 PM"}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-400">Shift Start</p>
@@ -312,7 +345,9 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
         {/* Attendance Actions */}
         {!isDayOff && (
           <div className="bg-white p-4 rounded-xl shadow-sm space-y-4">
-            <h3 className="font-semibold text-slate-700 text-center">Attendance Actions</h3>
+            <h3 className="font-semibold text-slate-700 text-center">
+              Attendance Actions
+            </h3>
             <div className="flex flex-wrap justify-center gap-3">
               <button
                 onClick={handleClockIn}
@@ -339,7 +374,9 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
         {/* Breaks */}
         {shiftStarted && (
           <div className="bg-white p-4 rounded-xl shadow-sm space-y-3">
-            <h3 className="font-semibold text-slate-700 text-center">Break Options</h3>
+            <h3 className="font-semibold text-slate-700 text-center">
+              Break Options
+            </h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <button
                 onClick={() => startBreak("Tea", 15)}
@@ -398,12 +435,15 @@ const ADMIN_PASSWORD = "Sky@2204"; // change to your own strong password
           >
             <Download size={16} /> Download Excel
           </button>
-          
         </div>
       </main>
 
       {/* Leave Modal */}
-      <Modal open={leaveOpen} title="Apply for Leave" onClose={() => setLeaveOpen(false)}>
+      <Modal
+        open={leaveOpen}
+        title="Apply for Leave"
+        onClose={() => setLeaveOpen(false)}
+      >
         <div className="flex flex-col gap-3">
           <label className="text-sm">From Date:</label>
           <input
