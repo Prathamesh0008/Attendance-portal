@@ -2,14 +2,14 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBrlXdtAGIvm0gT4U_9ispdTZerA4ngN5E",
-  authDomain: "nova-attendance-1bf55.firebaseapp.com",
-  projectId: "nova-attendance-1bf55",
-  storageBucket: "nova-attendance-1bf55.appspot.com",
-  messagingSenderId: "1059401009724",
-  appId: "1:1059401009724:web:a39aeb314635d6e4571139",
-  measurementId: "G-9SNLK3SHJZ",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-export const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
